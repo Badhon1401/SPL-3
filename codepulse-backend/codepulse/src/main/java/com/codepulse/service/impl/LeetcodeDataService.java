@@ -12,6 +12,7 @@ import lombok.Data;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.core.ParameterizedTypeReference;
 import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -36,6 +37,9 @@ public class LeetcodeDataService {
     @Value("${leetcode.api.base-url}")
     private String leetcodeBaseUrl;
 
+    @Value("${leetcode.max-submissions}")
+    private int maxSubmissions;
+
     @Async
     @Transactional
     public void syncUserSubmissions(User user) {
@@ -45,25 +49,23 @@ public class LeetcodeDataService {
             return;
         }
 
-        log.info("Syncing LeetCode submissions for handle: {}", handle);
+        log.info("Syncing LeetCode submissions for handle: {} (max {})", handle, maxSubmissions);
 
         try {
-            // Step 1: Fetch recent AC submissions (limit 20 newest)
-            List<LeetCodeAcSubmission> recentAccepted = fetchRecentAcSubmissions(handle);
-            if (recentAccepted.isEmpty()) {
-                log.info("No AC submissions found for {}", handle);
+            // Fetch recent submissions (all verdicts) with pagination, capped at maxSubmissions
+            List<LeetCodeSubmission> recentSubs = fetchRecentSubmissions(handle, maxSubmissions);
+            if (recentSubs.isEmpty()) {
+                log.info("No submissions found for {}", handle);
                 return;
             }
 
-            // Step 2: For each AC submission, fetch detailed problem info
             int newCount = 0;
-            for (LeetCodeAcSubmission acSub : recentAccepted) {
-                String titleSlug = acSub.getTitleSlug();
-                // Check if already synced by platform submission id (use LeetCode’s submission id)
-                String platformId = "LC_" + acSub.getId(); // prefix to avoid collision with Codeforces
+            for (LeetCodeSubmission lcSub : recentSubs) {
+                String titleSlug = lcSub.getTitleSlug();
+                String platformId = "LC_" + lcSub.getId();
                 if (submissionRepository.existsByPlatformSubmissionId(platformId)) continue;
 
-                // Fetch problem details (difficulty, topics, url)
+                // Fetch problem details (difficulty, topics, URL)
                 LeetCodeProblemDetail detail = fetchProblemDetail(titleSlug);
                 if (detail == null) continue;
 
@@ -73,68 +75,81 @@ public class LeetcodeDataService {
                         .platformSubmissionId(platformId)
                         .user(user)
                         .problem(problem)
-                        .verdict(Submission.Verdict.ACCEPTED) // only AC is fetched
-                        .language(acSub.getLang())
+                        .verdict(mapLeetCodeVerdict(lcSub.getStatus()))
+                        .language(lcSub.getLang())
                         .submittedAt(LocalDateTime.ofInstant(
-                                Instant.ofEpochSecond(acSub.getTimestamp()), ZoneId.systemDefault()))
+                                Instant.ofEpochSecond(lcSub.getTimestamp()),
+                                ZoneId.systemDefault()))
                         .build();
 
                 submissionRepository.save(submission);
                 newCount++;
             }
 
-            log.info("Synced {} new LeetCode AC submissions for {}", newCount, handle);
+            log.info("Synced {} new LeetCode submissions for {}", newCount, handle);
 
         } catch (Exception e) {
             log.error("Failed to sync LeetCode data for {}: {}", handle, e.getMessage());
         }
     }
 
-    // ─── GraphQL queries ────────────────────────────────────────────
+    private List<LeetCodeSubmission> fetchRecentSubmissions(String username, int max) {
+        int requestLimit = Math.min(max, 200);
 
-    private List<LeetCodeAcSubmission> fetchRecentAcSubmissions(String username) {
         String query = """
-        query recentAcSubmissions($username: String!, $limit: Int) {
-          recentAcSubmissionList(username: $username, limit: $limit) {
-            id
-            title
-            titleSlug
-            timestamp
-            lang
-          }
+        query recentSubmissions($username: String!, $limit: Int) {
+            recentSubmissionList(username: $username, limit: $limit) {
+                id
+                title
+                titleSlug
+                timestamp
+                lang
+                status
+            }
         }""";
 
-        Map<String, Object> variables = Map.of("username", username, "limit", 20);
+        Map<String, Object> variables = Map.of(
+                "username", username,
+                "limit", requestLimit
+        );
 
-        LeetCodeGraphQLResponse<RecentAcWrapper> response = webClientBuilder.build()
+        LeetCodeGraphQLResponse<RecentSubmissionWrapper> response = webClientBuilder.build()
                 .post()
                 .uri(leetcodeBaseUrl)
+                .header("Referer", "https://leetcode.com")
+                .header("Content-Type", "application/json")
                 .bodyValue(Map.of("query", query, "variables", variables))
                 .retrieve()
-                .bodyToMono(LeetCodeGraphQLResponse.class)
+                .bodyToMono(new ParameterizedTypeReference<LeetCodeGraphQLResponse<RecentSubmissionWrapper>>() {})
                 .block();
 
         if (response != null && response.getData() != null
-                && response.getData().getRecentAcSubmissionList() != null) {
-            return response.getData().getRecentAcSubmissionList();
+                && response.getData().getRecentSubmissionList() != null) {
+
+            return response.getData().getRecentSubmissionList()
+                    .stream()
+                    .limit(max)
+                    .collect(Collectors.toList());
         }
         return List.of();
     }
 
+    // ─── Fetch problem detail ─────────────────────────
+
     private LeetCodeProblemDetail fetchProblemDetail(String titleSlug) {
         String query = """
-        query problemDetail($titleSlug: String!) {
-          question(titleSlug: $titleSlug) {
-            questionId
-            title
-            titleSlug
-            difficulty
-            topicTags {
-              name
-              slug
-            }
-          }
-        }""";
+            query problemDetail($titleSlug: String!) {
+                question(titleSlug: $titleSlug) {
+                    questionId
+                    title
+                    titleSlug
+                    difficulty
+                    topicTags {
+                        name
+                        slug
+                    }
+                }
+            }""";
 
         Map<String, Object> variables = Map.of("titleSlug", titleSlug);
 
@@ -143,7 +158,7 @@ public class LeetcodeDataService {
                 .uri(leetcodeBaseUrl)
                 .bodyValue(Map.of("query", query, "variables", variables))
                 .retrieve()
-                .bodyToMono(LeetCodeGraphQLResponse.class)
+                .bodyToMono(new ParameterizedTypeReference<LeetCodeGraphQLResponse<QuestionWrapper>>() {})
                 .block();
 
         if (response != null && response.getData() != null) {
@@ -152,7 +167,23 @@ public class LeetcodeDataService {
         return null;
     }
 
-    // ─── Problem creation ──────────────────────────────────────────
+    // ─── Topic resolution ─────────────────────────────
+
+    private Topic resolveTopic(String name, String slug) {
+        Optional<Topic> bySlug = topicRepository.findBySlug(slug);
+        if (bySlug.isPresent()) return bySlug.get();
+
+        Optional<Topic> byName = topicRepository.findByName(name);
+        if (byName.isPresent()) return byName.get();
+
+        Topic newTopic = Topic.builder()
+                .name(name)
+                .slug(slug)
+                .build();
+        return topicRepository.save(newTopic);
+    }
+
+    // ─── Problem creation ─────────────────────────────
 
     private Problem getOrCreateProblem(String titleSlug, LeetCodeProblemDetail detail) {
         return problemRepository.findByPlatformIdAndPlatform(titleSlug, "LEETCODE")
@@ -161,19 +192,32 @@ public class LeetcodeDataService {
                             .platformId(titleSlug)
                             .platform("LEETCODE")
                             .title(detail.getTitle())
-                            .difficultyLabel(detail.getDifficulty()) // Easy/Medium/Hard
+                            .difficultyLabel(detail.getDifficulty())
                             .problemUrl("https://leetcode.com/problems/" + titleSlug + "/")
                             .topics(detail.getTopicTags().stream()
-                                    .map(tag -> topicRepository.findBySlug(tag.getSlug())
-                                            .orElseGet(() -> topicRepository.save(
-                                                    Topic.builder().name(tag.getName()).slug(tag.getSlug()).build())))
+                                    .map(tag -> resolveTopic(tag.getName(), tag.getSlug()))
                                     .collect(Collectors.toList()))
                             .build();
                     return problemRepository.save(p);
                 });
     }
 
-    // ─── POJOs ─────────────────────────────────────────────────────
+    // ─── Verdict mapping (new helper) ─────────────────────────────
+
+    private Submission.Verdict mapLeetCodeVerdict(String leetcodeStatus) {
+        if (leetcodeStatus == null) return Submission.Verdict.SKIPPED;
+        return switch (leetcodeStatus) {
+            case "Accepted" -> Submission.Verdict.ACCEPTED;
+            case "Wrong Answer" -> Submission.Verdict.WRONG_ANSWER;
+            case "Time Limit Exceeded" -> Submission.Verdict.TIME_LIMIT_EXCEEDED;
+            case "Memory Limit Exceeded" -> Submission.Verdict.MEMORY_LIMIT_EXCEEDED;
+            case "Runtime Error", "Output Limit Exceeded" -> Submission.Verdict.RUNTIME_ERROR;
+            case "Compile Error" -> Submission.Verdict.COMPILATION_ERROR;
+            default -> Submission.Verdict.SKIPPED;
+        };
+    }
+
+    // ─── POJOs ────────────────────────────────────────
 
     @Data
     @JsonIgnoreProperties(ignoreUnknown = true)
@@ -183,18 +227,19 @@ public class LeetcodeDataService {
 
     @Data
     @JsonIgnoreProperties(ignoreUnknown = true)
-    static class RecentAcWrapper {
-        private List<LeetCodeAcSubmission> recentAcSubmissionList;
+    static class RecentSubmissionWrapper {
+        private List<LeetCodeSubmission> recentSubmissionList;
     }
 
     @Data
     @JsonIgnoreProperties(ignoreUnknown = true)
-    static class LeetCodeAcSubmission {
+    static class LeetCodeSubmission {
         private String id;
         private String title;
         private String titleSlug;
         private long timestamp;
         private String lang;
+        private String status;
     }
 
     @Data
