@@ -4,7 +4,6 @@ import com.codepulse.dto.response.RecommendationResponse;
 import com.codepulse.entity.Problem;
 import com.codepulse.entity.Recommendation;
 import com.codepulse.entity.Submission;
-import com.codepulse.entity.Topic;
 import com.codepulse.entity.User;
 import com.codepulse.exception.ResourceNotFoundException;
 import com.codepulse.repository.ProblemRepository;
@@ -34,7 +33,22 @@ public class RecommendationServiceImpl implements RecommendationService {
 
     private static final int MAX_RECOMMENDATIONS = 10;
 
+    /**
+     * FIX: Added @Transactional(readOnly = true).
+     *
+     * Previously this method had NO @Transactional annotation.
+     * After findActiveByUserId() returned, the JPA session was already closed.
+     * The stream().map(RecommendationResponse::fromRecommendation) then tried
+     * to access rec.getProblem().getTitle() on an uninitialized LAZY proxy →
+     * LazyInitializationException.
+     *
+     * Now the session stays open for the full method duration.
+     * The RecommendationRepository query already uses JOIN FETCH for Problem
+     * and Topics, so no extra SQL is fired — the @Transactional is just a
+     * safety boundary.
+     */
     @Override
+    @Transactional(readOnly = true)
     public List<RecommendationResponse> getRecommendations(Long userId) {
         return recommendationRepository.findActiveByUserId(userId).stream()
                 .map(RecommendationResponse::fromRecommendation)
@@ -45,59 +59,54 @@ public class RecommendationServiceImpl implements RecommendationService {
     @Transactional
     public void generateRecommendations(Long userId) {
         User user = userService.getUserById(userId);
-
-        // Clear old recommendations
         recommendationRepository.deleteByUserId(userId);
 
+        // findByUserId uses JOIN FETCH — safe to call getProblem() / getTopics()
         List<Submission> submissions = submissionRepository.findByUserId(userId);
         if (submissions.isEmpty()) {
-            log.info("No submissions found for user {}. Skipping recommendation generation.", userId);
+            log.info("No submissions for user {}. Skipping recommendation generation.", userId);
             return;
         }
 
-        // Get solved problem IDs to exclude them
         List<Long> solvedProblemIds = submissionRepository.findAcceptedProblemIdsByUserId(userId);
         List<Long> excludeIds = solvedProblemIds.isEmpty() ? List.of(-1L) : solvedProblemIds;
 
-        // Compute topic weakness scores
         Map<String, Double> weaknessScores = computeWeaknessScores(submissions);
-
-        // Estimate user rating level
         int estimatedRating = estimateUserRating(submissions);
         int ratingMin = Math.max(800, estimatedRating - 200);
         int ratingMax = estimatedRating + 300;
 
         List<Recommendation> recommendations = new ArrayList<>();
 
-        // Generate recommendations for weakest topics (top 3)
+        // Weakness-based recommendations (top 3 weak topics)
         weaknessScores.entrySet().stream()
-                .filter(e -> e.getValue() > 0.3) // weakness threshold
+                .filter(e -> e.getValue() > 0.3)
                 .limit(3)
                 .forEach(entry -> {
                     String topicName = entry.getKey();
                     double weakness = entry.getValue();
+                    String slug = topicName.toLowerCase().replace(" ", "-");
 
-                    topicRepository.findBySlug(topicName.toLowerCase().replace(" ", "-"))
-                            .ifPresent(topic -> {
-                                List<Problem> candidates = problemRepository
-                                        .findUnsolvedByTopicId(topic.getId(), excludeIds);
+                    topicRepository.findBySlug(slug).ifPresent(topic -> {
+                        List<Problem> candidates = problemRepository
+                                .findUnsolvedByTopicId(topic.getId(), excludeIds);
 
-                                candidates.stream()
-                                        .filter(p -> p.getDifficultyRating() != null
-                                                && p.getDifficultyRating() >= ratingMin
-                                                && p.getDifficultyRating() <= ratingMax)
-                                        .limit(3)
-                                        .forEach(problem -> recommendations.add(
-                                                Recommendation.builder()
-                                                        .user(user)
-                                                        .problem(problem)
-                                                        .reason("Weakness detected in " + topicName)
-                                                        .score(weakness)
-                                                        .build()));
-                            });
+                        candidates.stream()
+                                .filter(p -> p.getDifficultyRating() != null
+                                        && p.getDifficultyRating() >= ratingMin
+                                        && p.getDifficultyRating() <= ratingMax)
+                                .limit(3)
+                                .forEach(problem -> recommendations.add(
+                                        Recommendation.builder()
+                                                .user(user)
+                                                .problem(problem)
+                                                .reason("Weakness detected in " + topicName)
+                                                .score(weakness)
+                                                .build()));
+                    });
                 });
 
-        // Fill remaining slots with difficulty-range-based suggestions
+        // Fill remaining slots with level-range suggestions
         int remaining = MAX_RECOMMENDATIONS - recommendations.size();
         if (remaining > 0) {
             Set<Long> alreadyPicked = recommendations.stream()
@@ -114,7 +123,7 @@ public class RecommendationServiceImpl implements RecommendationService {
                             Recommendation.builder()
                                     .user(user)
                                     .problem(problem)
-                                    .reason("Matches your current level (" + estimatedRating + ")")
+                                    .reason("Matches your current level (~" + estimatedRating + ")")
                                     .score(0.5)
                                     .build()));
         }
@@ -126,17 +135,13 @@ public class RecommendationServiceImpl implements RecommendationService {
     @Override
     @Transactional
     public void markSolved(Long userId, Long recommendationId) {
-        Recommendation rec = getRecommendationForUser(userId, recommendationId);
-        rec.setSolved(true);
-        recommendationRepository.save(rec);
+        getRecommendationForUser(userId, recommendationId).setSolved(true);
     }
 
     @Override
     @Transactional
     public void dismiss(Long userId, Long recommendationId) {
-        Recommendation rec = getRecommendationForUser(userId, recommendationId);
-        rec.setDismissed(true);
-        recommendationRepository.save(rec);
+        getRecommendationForUser(userId, recommendationId).setDismissed(true);
     }
 
     // ─── helpers ─────────────────────────────────────────────────────────────
@@ -148,28 +153,27 @@ public class RecommendationServiceImpl implements RecommendationService {
     }
 
     private Map<String, Double> computeWeaknessScores(List<Submission> submissions) {
-        Map<String, Long> totalPerTopic = new HashMap<>();
-        Map<String, Long> failedPerTopic = new HashMap<>();
+        Map<String, Long> total  = new HashMap<>();
+        Map<String, Long> failed = new HashMap<>();
 
         for (Submission s : submissions) {
+            // Problem is JOIN FETCH-ed — safe to call getTopics()
             s.getProblem().getTopics().forEach(t -> {
-                totalPerTopic.merge(t.getName(), 1L, Long::sum);
-                if (s.getVerdict() != Submission.Verdict.ACCEPTED) {
-                    failedPerTopic.merge(t.getName(), 1L, Long::sum);
-                }
+                total.merge(t.getName(), 1L, Long::sum);
+                if (s.getVerdict() != Submission.Verdict.ACCEPTED)
+                    failed.merge(t.getName(), 1L, Long::sum);
             });
         }
 
         Map<String, Double> scores = new HashMap<>();
-        totalPerTopic.forEach((topic, total) -> {
-            long failed = failedPerTopic.getOrDefault(topic, 0L);
-            scores.put(topic, total == 0 ? 0.0 : (double) failed / total);
+        total.forEach((topic, cnt) -> {
+            long f = failed.getOrDefault(topic, 0L);
+            scores.put(topic, cnt == 0 ? 0.0 : (double) f / cnt);
         });
 
         return scores.entrySet().stream()
                 .sorted(Map.Entry.<String, Double>comparingByValue().reversed())
-                .collect(Collectors.toMap(
-                        Map.Entry::getKey, Map.Entry::getValue,
+                .collect(Collectors.toMap(Map.Entry::getKey, Map.Entry::getValue,
                         (e1, e2) -> e1, LinkedHashMap::new));
     }
 
