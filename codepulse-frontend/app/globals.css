@@ -1,0 +1,277 @@
+@import url('https://fonts.googleapis.com/css2?family=Orbitron:wght@400;500;600;700;800;900&family=Rajdhani:wght@300;400;500;600;700&family=Exo+2:ital,wght@0,100..900;1,100..900&family=JetBrains+Mono:wght@400;500;600&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --background: 230 50% 4%;
+    --foreground: 210 40% 98%;
+    --card: 230 40% 7%;
+    --card-foreground: 210 40% 98%;
+    --popover: 230 40% 6%;
+    --popover-foreground: 210 40% 98%;
+    --primary: 190 100% 50%;
+    --primary-foreground: 230 50% 4%;
+    --secondary: 230 30% 15%;
+    --secondary-foreground: 210 40% 98%;
+    --muted: 230 30% 12%;
+    --muted-foreground: 215 20% 55%;
+    --accent: 280 80% 68%;
+    --accent-foreground: 210 40% 98%;
+    --destructive: 350 100% 50%;
+    --destructive-foreground: 210 40% 98%;
+    --border: 230 30% 16%;
+    --input: 230 30% 12%;
+    --ring: 190 100% 50%;
+    --radius: 0.75rem;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+
+  body {
+    @apply bg-background text-foreground;
+    font-family: 'Rajdhani', sans-serif;
+    font-size: 16px;
+    overflow-x: hidden;
+  }
+
+  h1, h2, h3, h4, h5, h6 {
+    font-family: 'Orbitron', monospace;
+  }
+
+  ::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+  }
+
+  ::-webkit-scrollbar-track {
+    background: #04050d;
+  }
+
+  ::-webkit-scrollbar-thumb {
+    background: rgba(0, 245, 255, 0.3);
+    border-radius: 3px;
+  }
+
+  ::-webkit-scrollbar-thumb:hover {
+    background: rgba(0, 245, 255, 0.6);
+  }
+
+  ::selection {
+    background: rgba(0, 245, 255, 0.3);
+    color: #fff;
+  }
+}
+
+@layer components {
+  .neon-text-cyan {
+    color: #00f5ff;
+    text-shadow: 0 0 7px #00f5ff, 0 0 10px #00f5ff, 0 0 21px #00f5ff;
+  }
+
+  .neon-text-green {
+    color: #39ff14;
+    text-shadow: 0 0 7px #39ff14, 0 0 10px #39ff14, 0 0 21px #39ff14;
+  }
+
+  .neon-text-purple {
+    color: #bf5fff;
+    text-shadow: 0 0 7px #bf5fff, 0 0 10px #bf5fff, 0 0 21px #bf5fff;
+  }
+
+  .neon-border-cyan {
+    border-color: rgba(0, 245, 255, 0.5);
+    box-shadow: 0 0 5px rgba(0, 245, 255, 0.3), inset 0 0 5px rgba(0, 245, 255, 0.1);
+  }
+
+  .neon-border-purple {
+    border-color: rgba(191, 95, 255, 0.5);
+    box-shadow: 0 0 5px rgba(191, 95, 255, 0.3), inset 0 0 5px rgba(191, 95, 255, 0.1);
+  }
+
+  .glass {
+    background: rgba(13, 18, 37, 0.6);
+    backdrop-filter: blur(20px);
+    -webkit-backdrop-filter: blur(20px);
+    border: 1px solid rgba(0, 245, 255, 0.1);
+  }
+
+  .glass-card {
+    background: rgba(13, 18, 37, 0.7);
+    backdrop-filter: blur(16px);
+    -webkit-backdrop-filter: blur(16px);
+    border: 1px solid rgba(255, 255, 255, 0.06);
+    transition: all 0.3s ease;
+  }
+
+  .glass-card:hover {
+    border-color: rgba(0, 245, 255, 0.2);
+    box-shadow: 0 0 20px rgba(0, 245, 255, 0.08), 0 20px 60px rgba(0, 0, 0, 0.4);
+    transform: translateY(-2px);
+  }
+
+  .gradient-text {
+    background: linear-gradient(135deg, #00f5ff 0%, #bf5fff 50%, #ff2d78 100%);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+  }
+
+  .shimmer-text {
+    background: linear-gradient(
+      90deg,
+      #00f5ff 0%,
+      #ffffff 25%,
+      #bf5fff 50%,
+      #ffffff 75%,
+      #00f5ff 100%
+    );
+    background-size: 200% auto;
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+    animation: text-shimmer 3s linear infinite;
+  }
+
+  .cyber-grid {
+    background-image: var(--tw-gradient-stops),
+      linear-gradient(to right, rgba(0, 245, 255, 0.04) 1px, transparent 1px),
+      linear-gradient(to bottom, rgba(0, 245, 255, 0.04) 1px, transparent 1px);
+    background-size: 100% 100%, 40px 40px, 40px 40px;
+  }
+
+  .hex-clip {
+    clip-path: polygon(50% 0%, 100% 25%, 100% 75%, 50% 100%, 0% 75%, 0% 25%);
+  }
+
+  .scan-overlay::after {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    height: 2px;
+    background: linear-gradient(90deg, transparent, rgba(0, 245, 255, 0.8), transparent);
+    animation: scan-line 4s linear infinite;
+    pointer-events: none;
+  }
+
+  .glow-btn {
+    position: relative;
+    overflow: hidden;
+    transition: all 0.3s ease;
+  }
+
+  .glow-btn::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: -100%;
+    width: 100%;
+    height: 100%;
+    background: linear-gradient(90deg, transparent, rgba(0, 245, 255, 0.2), transparent);
+    transition: left 0.5s ease;
+  }
+
+  .glow-btn:hover::before {
+    left: 100%;
+  }
+
+  .stat-card {
+    position: relative;
+    overflow: hidden;
+  }
+
+  .stat-card::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    height: 2px;
+    background: linear-gradient(90deg, transparent, var(--accent-color, #00f5ff), transparent);
+  }
+
+  .corner-brackets {
+    position: relative;
+  }
+
+  .corner-brackets::before,
+  .corner-brackets::after {
+    content: '';
+    position: absolute;
+    width: 12px;
+    height: 12px;
+    border-color: rgba(0, 245, 255, 0.6);
+    border-style: solid;
+  }
+
+  .corner-brackets::before {
+    top: -1px;
+    left: -1px;
+    border-width: 2px 0 0 2px;
+  }
+
+  .corner-brackets::after {
+    bottom: -1px;
+    right: -1px;
+    border-width: 0 2px 2px 0;
+  }
+
+  .progress-cyber {
+    background: rgba(0, 245, 255, 0.1);
+    border-radius: 2px;
+    overflow: hidden;
+  }
+
+  .progress-cyber-bar {
+    height: 100%;
+    background: linear-gradient(90deg, #00f5ff, #bf5fff);
+    position: relative;
+    border-radius: 2px;
+  }
+
+  .progress-cyber-bar::after {
+    content: '';
+    position: absolute;
+    right: 0;
+    top: 50%;
+    transform: translateY(-50%);
+    width: 4px;
+    height: 200%;
+    background: white;
+    box-shadow: 0 0 8px #00f5ff;
+    opacity: 0.8;
+  }
+}
+
+/* Particle canvas */
+#particle-canvas {
+  position: fixed;
+  top: 0;
+  left: 0;
+  pointer-events: none;
+  z-index: 0;
+}
+
+/* Chart tooltip override */
+.recharts-tooltip-wrapper .recharts-default-tooltip {
+  background: rgba(13, 18, 37, 0.9) !important;
+  border: 1px solid rgba(0, 245, 255, 0.3) !important;
+  border-radius: 8px !important;
+  backdrop-filter: blur(10px);
+}
+
+/* Heatmap styles */
+.react-calendar-heatmap .color-empty { fill: rgba(255,255,255,0.03); }
+.react-calendar-heatmap .color-scale-1 { fill: rgba(0,245,255,0.2); }
+.react-calendar-heatmap .color-scale-2 { fill: rgba(0,245,255,0.4); }
+.react-calendar-heatmap .color-scale-3 { fill: rgba(0,245,255,0.6); }
+.react-calendar-heatmap .color-scale-4 { fill: rgba(0,245,255,0.9); }
+.react-calendar-heatmap rect { rx: 2; ry: 2; }
