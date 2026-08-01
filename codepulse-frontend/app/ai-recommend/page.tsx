@@ -48,16 +48,17 @@ export default function AiRecommendPage() {
   });
 
   // Generate new
-  const generateMutation = useMutation({
-    mutationFn: () => aiApi.recommend(prompt.trim(), count),
-    onSuccess: (res) => {
-      const data = res.data.data;
-      qc.setQueryData(["ai-session"], data);
-      setPrompt("");
-      toast.success("AI recommendations generated!");
-    },
-    onError: () => toast.error("AI generation failed — check API key or try again"),
-  });
+ const generateMutation = useMutation({
+  mutationFn: () => aiApi.recommend(prompt.trim(), count),
+  onSuccess: (res) => {
+    const data = res.data.data;
+    // Update local query state immediately with response
+    qc.setQueryData(["ai-session"], data);
+    setPrompt("");
+    toast.success("AI recommendations generated!");
+  },
+  onError: () => toast.error("AI generation failed — check API key or try again"),
+});
 
   // Mark solved
   const solveMutation = useMutation({

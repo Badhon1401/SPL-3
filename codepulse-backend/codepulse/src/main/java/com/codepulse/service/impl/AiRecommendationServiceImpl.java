@@ -141,32 +141,51 @@ public class AiRecommendationServiceImpl implements AiRecommendationService {
     }
 
     @Override
+    @Transactional(readOnly = true)
     public AiPromptResponse getLatestSession(Long userId) {
-        return sessionRepo.findTopByUserIdAndActiveTrueOrderByCreatedAtDesc(userId)
-                .map(this::toResponse)
-                .orElse(null);
+
+        List<AiRecommendationSession> sessions =
+                sessionRepo.findLatestActiveSessions(userId);
+
+        if (sessions.isEmpty()) {
+            return null;
+        }
+
+        return toResponse(sessions.get(0));
     }
 
     @Override
     @Transactional
     public void markItemSolved(Long userId, Long itemId) {
-        itemRepo.findById(itemId).ifPresent(item -> {
-            if (item.getSession().getUser().getId().equals(userId)) {
-                item.setSolved(true);
-                itemRepo.save(item);
-            }
-        });
+
+        itemRepo.findByIdWithSessionAndUser(itemId)
+                .ifPresent(item -> {
+
+                    if (!item.getSession().getUser().getId().equals(userId)) {
+                        return;
+                    }
+
+                    item.setSolved(true);
+
+                    itemRepo.save(item);
+                });
     }
 
     @Override
     @Transactional
     public void dismissItem(Long userId, Long itemId) {
-        itemRepo.findById(itemId).ifPresent(item -> {
-            if (item.getSession().getUser().getId().equals(userId)) {
-                item.setDismissed(true);
-                itemRepo.save(item);
-            }
-        });
+
+        itemRepo.findByIdWithSessionAndUser(itemId)
+                .ifPresent(item -> {
+
+                    if (!item.getSession().getUser().getId().equals(userId)) {
+                        return;
+                    }
+
+                    item.setDismissed(true);
+
+                    itemRepo.save(item);
+                });
     }
 
     // ─── Rich context builder ─────────────────────────────────────────────────
@@ -290,16 +309,13 @@ public class AiRecommendationServiceImpl implements AiRecommendationService {
     public AiPromptResponse parseAndPersist(String raw, Long userId, User user,
                                             String prompt, int expectedCount, String modelUsed) {
         try {
-            String cleaned = raw.trim()
-                    .replaceAll("(?s)\\s*```$", "")
-                    .trim();
-
+            String cleaned = raw.trim().replaceAll("(?s)\\s*```$", "").trim();
             JsonNode root = objectMapper.readTree(cleaned);
 
-            // Deactivate previous session
+            // 1. Deactivate previous session
             sessionRepo.deactivateAllForUser(userId);
 
-            // Create new session
+            // 2. Build session entity
             List<String> focusAreas = new ArrayList<>();
             root.path("focusAreas").forEach(f -> focusAreas.add(f.asText()));
 
@@ -311,16 +327,20 @@ public class AiRecommendationServiceImpl implements AiRecommendationService {
                     .modelUsed(modelUsed)
                     .active(true)
                     .build();
-            session = sessionRepo.save(session);
 
-            List<AiRecommendationItem> items = new ArrayList<>();
+            final AiRecommendationSession savedSession = sessionRepo.save(session);
+
+            // 3. Build ALL items in memory first
+            List<AiRecommendationItem> itemsToSave = new ArrayList<>();
             JsonNode recsNode = root.path("recommendations");
+
             if (recsNode.isArray()) {
                 for (JsonNode n : recsNode) {
                     List<String> topics = new ArrayList<>();
                     n.path("topics").forEach(t -> topics.add(t.asText()));
+
                     AiRecommendationItem item = AiRecommendationItem.builder()
-                            .session(session)
+                            .session(savedSession)
                             .title(n.path("title").asText())
                             .platform(n.path("platform").asText("OTHER"))
                             .url(n.path("url").asText())
@@ -330,19 +350,21 @@ public class AiRecommendationServiceImpl implements AiRecommendationService {
                             .reason(n.path("reason").asText())
                             .timeEstimate(n.path("timeEstimate").asText())
                             .build();
-                    items.add(itemRepo.save(item));
+                    itemsToSave.add(item);
                 }
             }
-            session.setItems(items);
 
-            return toResponse(session);
+            // 4. FAST: Batch insert all items in ONE database call
+            List<AiRecommendationItem> savedItems = itemRepo.saveAll(itemsToSave);
+            savedSession.setItems(savedItems);
+
+            return toResponse(savedSession);
 
         } catch (Exception e) {
             log.error("AI parse/persist failed: {}. Raw: {}", e.getMessage(), raw.substring(0, Math.min(200, raw.length())));
             return buildError(prompt, null);
         }
     }
-
     private AiPromptResponse toResponse(AiRecommendationSession session) {
         List<AiItem> items = session.getItems().stream()
                 .filter(i -> !i.isDismissed())

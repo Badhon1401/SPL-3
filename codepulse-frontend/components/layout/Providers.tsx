@@ -5,11 +5,20 @@ import { Toaster } from "react-hot-toast";
 import { useState } from "react";
 
 export function Providers({ children }: { children: React.ReactNode }) {
-  const [queryClient] = useState(() => new QueryClient({
-    defaultOptions: {
-      queries: { staleTime: 1000 * 60 * 5, retry: 1 },
-    },
-  }));
+  const [queryClient] = useState(
+    () =>
+      new QueryClient({
+        defaultOptions: {
+          queries: {
+            staleTime: 0,               // Data is immediately stale
+            gcTime: 0,                  // v5 property: Purge memory immediately when leaving a page
+            refetchOnMount: "always",   // Always hit backend API on every page mount
+            refetchOnWindowFocus: true, // Refetch when clicking back into browser window
+            retry: 0,                   // Fail fast if Spring Boot is down (no retry delays)
+          },
+        },
+      })
+  );
 
   return (
     <QueryClientProvider client={queryClient}>
