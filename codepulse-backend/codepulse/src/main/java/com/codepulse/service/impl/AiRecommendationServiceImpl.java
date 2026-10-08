@@ -16,6 +16,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -31,6 +32,7 @@ public class AiRecommendationServiceImpl implements AiRecommendationService {
 
     private final DirectMistralService directMistralService;
     private final OpenRouterService openRouterService;
+    private final GroqService groqService;          // ← NEW
     private final AnalyticsService analyticsService;
     private final UserService userService;
     private final SubmissionRepository submissionRepository;
@@ -38,18 +40,29 @@ public class AiRecommendationServiceImpl implements AiRecommendationService {
     private final AiRecommendationItemRepository itemRepo;
     private final ObjectMapper objectMapper;
 
+    @Value("${mistral.model:mistral-small-latest}")
+    private String mistralModel;
+
     private static final String SYSTEM_PROMPT = """
         You are CodePulse AI — an expert competitive programming coach with deep knowledge of Codeforces, LeetCode, AtCoder, and CodeChef problems.
 
-        Your job: analyze the user's FULL performance data and their specific request, then recommend exactly the right problems.
+        CRITICAL OUTPUT RULE — YOUR ENTIRE RESPONSE MUST BE A SINGLE JSON OBJECT:
+        - The FIRST character of your response MUST be '{'.
+        - The LAST character of your response MUST be '}'.
+        - Do NOT write any text before the JSON. No "Here is", no "Sure", no "Thinking Process", no prose.
+        - Do NOT write any text after the JSON.
+        - Do NOT wrap the JSON in markdown code fences. No ```json. No ```.
+        - Do NOT add an extra '{' wrapper around the JSON. Output exactly ONE root object.
 
-        ABSOLUTE RULES — violations cause system failure:
-        1. Respond with ONLY valid, complete JSON. No markdown. No ```json. No text outside JSON.
-        2. Never truncate. Always close all braces and brackets.
-        3. Recommend REAL problems with REAL URLs. You know thousands of CF/LC/AC/CC problems from training.
-        4. The "reason" must reference specific weaknesses or goals from THIS user's data.
-        5. Spread recommendations across platforms when applicable.
-        6. Consider the user's recent problems to avoid repeating what they've recently solved.
+        OTHER RULES:
+        - Never truncate. Always close all braces and brackets.
+        - Recommend REAL problems with REAL URLs from Codeforces, LeetCode, AtCoder, or CodeChef.
+        - The "reason" field must reference specific weaknesses or goals from THIS user's data.
+        - Spread recommendations across platforms when applicable.
+        - Consider the user's recent problems to avoid repeating what they've recently solved.
+
+        If you cannot comply, respond with exactly:
+        {"recommendations":[],"coachInsight":"Unable to generate recommendations.","focusAreas":[]}
         """;
 
     @Override
@@ -69,123 +82,77 @@ public class AiRecommendationServiceImpl implements AiRecommendationService {
 
         log.info("Sending AI request for user {} ({})", userId, request.getPrompt());
 
-        String rawResponse;
-        String modelUsed;
+        String rawResponse = null;
+        String modelUsed = null;
 
-        try {
-            // PRIMARY
-            rawResponse = directMistralService.chat(
-                    SYSTEM_PROMPT,
-                    userMessage
-            );
-
-            modelUsed = "mistral-large-latest";
-
-            log.info("Primary Mistral model succeeded");
-
-        } catch (Exception mistralException) {
-
-            log.warn(
-                    "Primary Mistral failed: {}. Trying OpenRouter fallbacks...",
-                    mistralException.getMessage()
-            );
-
-            if (!openRouterService.isConfigured()) {
-
-                log.error(
-                        "Mistral failed and OpenRouter API key is not configured"
-                );
-
-                return buildError(
-                        request.getPrompt(),
-                        "AI service unavailable."
-                );
-            }
-
+        // ═══ Attempt 1: Groq (reliable, fast, free) ═══
+        if (groqService.isConfigured()) {
             try {
-
-                rawResponse = openRouterService.chat(
-                        SYSTEM_PROMPT,
-                        userMessage
-                );
-
-                modelUsed = openRouterService.getLastSuccessfulModel();
-
-                log.info(
-                        "Fallback model succeeded: {}",
-                        modelUsed
-                );
-
-            } catch (Exception fallbackException) {
-
-                log.error(
-                        "All fallback models failed: {}",
-                        fallbackException.getMessage()
-                );
-
-                return buildError(
-                        request.getPrompt(),
-                        "All AI providers are currently unavailable."
-                );
+                rawResponse = groqService.chat(SYSTEM_PROMPT, userMessage);
+                modelUsed = groqService.getLastSuccessfulModel();
+                log.info("✅ Groq succeeded: {}", modelUsed);
+            } catch (Exception e) {
+                log.warn("Groq failed: {}", e.getMessage());
             }
         }
 
-        return parseAndPersist(
-                rawResponse,
-                userId,
-                user,
-                request.getPrompt(),
-                count,
-                modelUsed
-        );
+        // ═══ Attempt 2: Mistral ═══
+        if (rawResponse == null) {
+            try {
+                rawResponse = directMistralService.chat(SYSTEM_PROMPT, userMessage);
+                modelUsed = mistralModel;
+                log.info("✅ Mistral succeeded: {}", modelUsed);
+            } catch (Exception e) {
+                log.warn("Mistral failed: {}", e.getMessage());
+            }
+        }
+
+        // ═══ Attempt 3: OpenRouter ═══
+        if (rawResponse == null && openRouterService.isConfigured()) {
+            try {
+                rawResponse = openRouterService.chat(SYSTEM_PROMPT, userMessage);
+                modelUsed = openRouterService.getLastSuccessfulModel();
+                log.info("✅ OpenRouter succeeded: {}", modelUsed);
+            } catch (Exception e) {
+                log.warn("OpenRouter failed: {}", e.getMessage());
+            }
+        }
+
+        if (rawResponse == null) {
+            return buildError(request.getPrompt(), "All AI providers are currently unavailable.");
+        }
+
+        return parseAndPersist(rawResponse, userId, user, request.getPrompt(), count, modelUsed);
     }
 
     @Override
     @Transactional(readOnly = true)
     public AiPromptResponse getLatestSession(Long userId) {
-
-        List<AiRecommendationSession> sessions =
-                sessionRepo.findLatestActiveSessions(userId);
-
+        List<AiRecommendationSession> sessions = sessionRepo.findLatestActiveSessions(userId);
         if (sessions.isEmpty()) {
             return null;
         }
-
         return toResponse(sessions.get(0));
     }
 
     @Override
     @Transactional
     public void markItemSolved(Long userId, Long itemId) {
-
-        itemRepo.findByIdWithSessionAndUser(itemId)
-                .ifPresent(item -> {
-
-                    if (!item.getSession().getUser().getId().equals(userId)) {
-                        return;
-                    }
-
-                    item.setSolved(true);
-
-                    itemRepo.save(item);
-                });
+        itemRepo.findByIdWithSessionAndUser(itemId).ifPresent(item -> {
+            if (!item.getSession().getUser().getId().equals(userId)) return;
+            item.setSolved(true);
+            itemRepo.save(item);
+        });
     }
 
     @Override
     @Transactional
     public void dismissItem(Long userId, Long itemId) {
-
-        itemRepo.findByIdWithSessionAndUser(itemId)
-                .ifPresent(item -> {
-
-                    if (!item.getSession().getUser().getId().equals(userId)) {
-                        return;
-                    }
-
-                    item.setDismissed(true);
-
-                    itemRepo.save(item);
-                });
+        itemRepo.findByIdWithSessionAndUser(itemId).ifPresent(item -> {
+            if (!item.getSession().getUser().getId().equals(userId)) return;
+            item.setDismissed(true);
+            itemRepo.save(item);
+        });
     }
 
     // ─── Rich context builder ─────────────────────────────────────────────────
@@ -215,7 +182,6 @@ public class AiRecommendationServiceImpl implements AiRecommendationService {
             sb.append("- Current Streak: ").append(a.getCurrentStreak()).append(" days\n");
             sb.append("- Longest Streak: ").append(a.getLongestStreak()).append(" days\n\n");
 
-            // Per-platform breakdown
             if (a.getPlatformBreakdown() != null && !a.getPlatformBreakdown().isEmpty()) {
                 sb.append("## Per-Platform Stats\n");
                 a.getPlatformBreakdown().forEach((plat, stats) ->
@@ -226,7 +192,6 @@ public class AiRecommendationServiceImpl implements AiRecommendationService {
                 sb.append("\n");
             }
 
-            // Weaknesses (sorted by failure rate)
             if (a.getWeaknessScores() != null && !a.getWeaknessScores().isEmpty()) {
                 sb.append("## Topic Weakness Analysis (higher % = weaker)\n");
                 a.getWeaknessScores().entrySet().stream().limit(8).forEach(e ->
@@ -235,7 +200,6 @@ public class AiRecommendationServiceImpl implements AiRecommendationService {
                 sb.append("\n");
             }
 
-            // Strengths
             if (a.getTopicBreakdown() != null && !a.getTopicBreakdown().isEmpty()) {
                 sb.append("## Topic Strengths (most solved)\n");
                 a.getTopicBreakdown().entrySet().stream()
@@ -244,7 +208,6 @@ public class AiRecommendationServiceImpl implements AiRecommendationService {
                 sb.append("\n");
             }
 
-            // Difficulty distribution
             if (a.getDifficultyBreakdown() != null && !a.getDifficultyBreakdown().isEmpty()) {
                 sb.append("## Difficulty Distribution\n");
                 a.getDifficultyBreakdown().forEach((d, cnt) ->
@@ -255,7 +218,6 @@ public class AiRecommendationServiceImpl implements AiRecommendationService {
             sb.append("## Performance Data: Not yet available (no synced submissions)\n\n");
         }
 
-        // Recent problems (last 15 unique accepted problems)
         if (!recent.isEmpty()) {
             sb.append("## Recently Solved Problems (avoid recommending these)\n");
             recent.stream()
@@ -265,7 +227,6 @@ public class AiRecommendationServiceImpl implements AiRecommendationService {
                     .forEach(t -> sb.append("- ").append(t).append("\n"));
             sb.append("\n");
 
-            // Recent attempts with WA/TLE (topics where user is currently struggling)
             sb.append("## Recent Struggle Areas (recent WA/TLE attempts)\n");
             recent.stream()
                     .filter(s -> s.getVerdict() == Submission.Verdict.WRONG_ANSWER
@@ -303,19 +264,51 @@ public class AiRecommendationServiceImpl implements AiRecommendationService {
         """.formatted(count);
     }
 
+    // ─── Robust JSON extraction ─────────────────────────────────────────────
+
+    private String extractJson(String raw) {
+        if (raw == null || raw.isBlank()) {
+            throw new IllegalArgumentException("AI response was null or blank");
+        }
+
+        String s = raw.trim();
+
+        s = s.replaceAll("(?s)^\\s*```(?:json)?\\s*", "")
+                .replaceAll("(?s)\\s*```\\s*$", "")
+                .trim();
+
+        for (int start = 0; start < s.length(); start++) {
+            if (s.charAt(start) != '{') continue;
+
+            int end = s.lastIndexOf('}');
+            while (end > start) {
+                String candidate = s.substring(start, end + 1);
+                try {
+                    objectMapper.readTree(candidate);
+                    return candidate;
+                } catch (Exception ignored) {
+                    // try a shorter end
+                }
+                end = s.lastIndexOf('}', end - 1);
+            }
+        }
+
+        throw new IllegalArgumentException(
+                "No valid JSON object found in AI response. First 300 chars: "
+                        + s.substring(0, Math.min(300, s.length())));
+    }
+
     // ─── Parse + persist ──────────────────────────────────────────────────────
 
     @Transactional
     public AiPromptResponse parseAndPersist(String raw, Long userId, User user,
                                             String prompt, int expectedCount, String modelUsed) {
         try {
-            String cleaned = raw.trim().replaceAll("(?s)\\s*```$", "").trim();
+            String cleaned = extractJson(raw);
             JsonNode root = objectMapper.readTree(cleaned);
 
-            // 1. Deactivate previous session
             sessionRepo.deactivateAllForUser(userId);
 
-            // 2. Build session entity
             List<String> focusAreas = new ArrayList<>();
             root.path("focusAreas").forEach(f -> focusAreas.add(f.asText()));
 
@@ -330,7 +323,6 @@ public class AiRecommendationServiceImpl implements AiRecommendationService {
 
             final AiRecommendationSession savedSession = sessionRepo.save(session);
 
-            // 3. Build ALL items in memory first
             List<AiRecommendationItem> itemsToSave = new ArrayList<>();
             JsonNode recsNode = root.path("recommendations");
 
@@ -354,17 +346,18 @@ public class AiRecommendationServiceImpl implements AiRecommendationService {
                 }
             }
 
-            // 4. FAST: Batch insert all items in ONE database call
             List<AiRecommendationItem> savedItems = itemRepo.saveAll(itemsToSave);
             savedSession.setItems(savedItems);
 
             return toResponse(savedSession);
 
         } catch (Exception e) {
-            log.error("AI parse/persist failed: {}. Raw: {}", e.getMessage(), raw.substring(0, Math.min(200, raw.length())));
+            log.error("AI parse/persist failed: {}. Raw: {}", e.getMessage(),
+                    raw == null ? "null" : raw.substring(0, Math.min(300, raw.length())));
             return buildError(prompt, null);
         }
     }
+
     private AiPromptResponse toResponse(AiRecommendationSession session) {
         List<AiItem> items = session.getItems().stream()
                 .filter(i -> !i.isDismissed())
@@ -409,7 +402,7 @@ public class AiRecommendationServiceImpl implements AiRecommendationService {
                 .coachInsight(msg != null ? msg : "The AI service is temporarily unavailable. Please try again.")
                 .focusAreas(List.of())
                 .originalPrompt(prompt)
-                .modelUsed("mistral-large-latest")
+                .modelUsed(mistralModel)
                 .generatedAt(LocalDateTime.now())
                 .build();
     }
