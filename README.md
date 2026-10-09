@@ -1,498 +1,336 @@
-# CodePulse — Intelligent Multi-Platform Coding Performance Analyzer
+# CodePulse — Spring Boot Backend
 
-> **Student:** Abdus Salam Islam Badhon | **ID:** BSSE-1401  
-> **Supervisor:** Mohd. Zulfiquar Hafiz, Professor, IIT — University of Dhaka
+**Intelligent Coding Performance Analyzer**
+**Student:** Abdus Salam Islam Badhon | **ID:** BSSE-1401 | **Supervisor:** Mohd. Zulfiquar Hafiz
 
----
-
-## Overview
-
-CodePulse is a full-stack web application that aggregates and analyses competitive programming activity from **Codeforces, LeetCode, AtCoder, and CodeChef** into a single intelligent dashboard. Instead of checking four separate platforms, users get one unified view of their strengths, weaknesses, combined rating, and AI-generated problem recommendations.
-
-### Core Value Propositions
-
-| Problem (status quo) | CodePulse solution |
-|---|---|
-| Stats scattered across 4 platforms | Single combined dashboard |
-| No cross-platform weakness detection | Unified topic weakness radar |
-| Rating comparison between platforms is hard | CodePulse Rating — one number from all 4 |
-| Problem selection is manual/random | Algorithmic + AI-powered recommendations |
-| No insight into behavioural patterns | Hidden findings engine (8+ auto-generated insights) |
-| AI can't understand your coding history | Mistral AI receives your full performance context |
-
----
-
-## Architecture
-
-```
-┌─────────────────────────────────────────────────────────┐
-│                    Next.js 14 Frontend                  │
-│  Dashboard · Analytics · Recommendations · AI Coach     │
-└──────────────────────┬──────────────────────────────────┘
-                       │ REST / JWT
-┌──────────────────────▼──────────────────────────────────┐
-│               Spring Boot 3.2 Backend                   │
-│                                                         │
-│  AuthController  AnalyticsController  AiController      │
-│  UserController  RecommendationController               │
-│  SubmissionController                                   │
-│                                                         │
-│  ┌──────────────┐  ┌───────────────┐  ┌─────────────┐  │
-│  │ Analytics    │  │ Recommendation│  │  Mistral AI  │  │
-│  │ Service      │  │ Engine        │  │  (Spring AI) │  │
-│  └──────┬───────┘  └───────┬───────┘  └──────┬──────┘  │
-│         │                  │                  │         │
-│  ┌──────▼──────────────────▼──────────────────▼──────┐  │
-│  │         Data Sync Layer (Async, @Scheduled)       │  │
-│  │  CF Sync  ·  LC Sync  ·  AtCoder Sync  ·  CC Sync │  │
-│  └──────────────────────┬────────────────────────────┘  │
-└─────────────────────────┼───────────────────────────────┘
-                          │ JPA / Hibernate
-┌─────────────────────────▼───────────────────────────────┐
-│                    PostgreSQL                           │
-│  users · submissions · problems · topics                │
-│  recommendations · ai_sessions · ai_items               │
-└─────────────────────────────────────────────────────────┘
-```
+CodePulse collects a competitive programmer's submissions from **Codeforces, LeetCode, AtCoder and CodeChef**,
+turns them into analytics (a unified *CodePulse Rating*, weak/strong topics, streaks, heatmap), and recommends
+what to practise next, both with a rule-based engine and with an **AI coach** that answers free-text requests
+such as "give me some tree problems".
 
 ---
 
 ## Tech Stack
 
-### Backend
-| Layer | Technology |
-|---|---|
-| Language | Java 17 |
-| Framework | Spring Boot 3.2 |
-| Security | Spring Security + JWT (jjwt 0.11.5) + BCrypt |
-| AI | Spring AI 1.0.0-M6 + Mistral `mistral-large-latest` |
-| ORM | Spring Data JPA / Hibernate 6 |
-| HTTP Client | Spring WebFlux WebClient |
-| Database | PostgreSQL 15+ |
-| Build | Maven 3.9 |
-
-### Frontend
-| Layer | Technology |
-|---|---|
-| Framework | Next.js 14 (App Router) |
-| Language | TypeScript |
-| Styling | Tailwind CSS + custom cyberpunk theme |
-| Animation | Framer Motion |
-| Charts | Recharts |
-| State | Zustand + TanStack Query v5 |
-| HTTP | Axios |
-| Fonts | Orbitron · Rajdhani · JetBrains Mono |
-
----
-
-## Supported Platforms
-
-| Platform | API | Data collected |
-|---|---|---|
-| **Codeforces** | Official REST API | Submissions, verdict, rating history, problem tags, difficulty |
-| **LeetCode** | GraphQL API | Submissions, Easy/Medium/Hard difficulty, topic tags |
-| **AtCoder** | kenkoooo.com community API | Submissions, difficulty model (Elo-like), contest info |
-| **CodeChef** | Community wrapper API | Solved problems, division-based difficulty estimation |
+| Layer        | Technology                                                             |
+|--------------|------------------------------------------------------------------------|
+| Language     | Java 17                                                                |
+| Framework    | Spring Boot 3.3.4 (Hibernate 6.5.3)                                    |
+| Security     | Spring Security + JWT + BCrypt                                         |
+| Database     | PostgreSQL (hosted on Neon, SSL required)                              |
+| HTTP clients | WebClient (platform APIs), RestTemplate (AI providers)                 |
+| AI providers | Groq, Mistral, OpenRouter (free models), all with automatic fallback   |
+| Build tool   | Maven                                                                  |
+| Frontend     | Next.js 14, React 18, Tailwind, Recharts, Zustand, Axios, React Query  |
 
 ---
 
 ## Features
 
-### 1. Combined Dashboard
-- **CodePulse Rating** — unified rating computed from all 4 platforms (see algorithm below)
-- Current & longest streak across all platforms
-- Platform connection grid showing handle names + stats
-- Recent submissions timeline (clickable links to actual problems)
-
-### 2. Deep Analytics (no duplication with dashboard)
-- Activity heatmap (26 weeks, all platforms combined)
-- Per-platform comparison chart
-- CF rating trend line chart
-- Difficulty distribution (normalised across platforms)
-- Topic coverage bar chart (top 12)
-- Weakness vs Strength radar
-- Combined verdict distribution donut
-- **Hidden Insights Engine** — auto-generates 6–10 findings:
-  - Critical weakness detection
-  - Zero-accepted topic (blind spots)
-  - Acceptance rate analysis
-  - Difficulty comfort-zone alert
-  - Streak pattern recognition
-  - Topic diversity score
-  - Platform imbalance detection
-  - Activity trend (last 30 vs previous 30 days)
-  - Strength signature recognition
-
-### 3. Curated Recommendations (`/recommendations`)
-- Algorithmic recommendations based on detected weakness topics
-- Estimated user rating determines difficulty range
-- Recommendations come from any of the 4 platforms
-- Platform filter (All / CF / LC / AC / CC)
-- Mark solved (feedback loop) · Dismiss
-- Generate new replaces previous
-
-### 4. AI Coach (`/ai-recommend`)
-- Free-text prompt ("I want to practice DP on trees")
-- Mistral AI receives **full user context**: rating, weakness scores, per-platform stats, recently solved problems, recent WA/TLE topics
-- Returns 4–10 personalised problem recommendations with direct URLs
-- Coach Insight paragraph + Focus Areas
-- Results stored in DB — shown on page load (previous session)
-- Regenerate replaces previous session
-- Mark solved · Dismiss per item
-
-### 5. Profile
-- All 4 platform handles always pre-filled from server
-- Connection status badge per platform
-- Clicking handle opens profile on that platform
-- Saving triggers re-sync eligibility
-
-### 6. Auto-Sync
-- Runs every 6 hours for all active users (configurable cron)
-- Triggered manually by user from any page
-- Submission pruning: keeps latest 300 per user (configurable)
-
----
-
-## CodePulse Rating Algorithm
-
-A single Elo-like number representing your combined performance:
-
-```
-For each connected platform:
-  CF_rating  = actual CF rating from /user.rating API (or estimated from solved problems)
-  LC_rating  = 1200 + (easy × 2) + (medium × 9) + (hard × 22) + acceptance_rate_bonus
-  AC_rating  = average difficulty of solved AtCoder problems × 1.05
-  CC_rating  = 1000 + (easy × 3) + (medium × 10) + (hard × 20) + (expert × 35)
-
-Weight per platform = √(submission_count_on_platform)
-  → More activity on a platform gives it more influence but with diminishing returns
-
-CodePulse_Rating = Σ(platform_rating × weight) / Σ(weight)
-  → Clipped to [800, 3800]
-```
-
-**Tier mapping** (mirrors CF tier names for familiarity):
-
-| Rating | Tier |
-|---|---|
-| < 1000 | Beginner |
-| 1000–1199 | Pupil |
-| 1200–1399 | Apprentice |
-| 1400–1599 | Specialist |
-| 1600–1899 | Expert |
-| 1900–2099 | Candidate Master |
-| 2100–2399 | Master |
-| 2400–2599 | International Master |
-| 2600–2999 | Grandmaster |
-| 3000+ | Legendary Grandmaster |
+- **Auth:** register / login with JWT, roles `USER` and `ADMIN`.
+- **Multi-platform sync:** Codeforces, LeetCode, AtCoder, CodeChef (manual button + automatic every 6 hours).
+- **Analytics:** acceptance rate, unique problems solved, streaks, activity heatmap, verdict distribution,
+  topic strengths, topic weakness scores, difficulty breakdown, per-platform stats, Codeforces rating trend.
+- **CodePulse Rating:** one Elo-like number combining all connected platforms (see below).
+- **Rule-based recommendations:** weakness-driven and level-driven problems from the local database.
+- **AI recommendations:** natural-language requests answered by an LLM using the user's own statistics,
+  stored as sessions, with solved / dismiss feedback per item.
+- **Housekeeping:** old submissions are pruned (default 300 per user) so analytics stay current.
 
 ---
 
 ## Project Structure
 
 ```
-codepulse/
-├── backend/                              Spring Boot backend
-│   └── src/main/java/com/codepulse/
-│       ├── CodePulseApplication.java
-│       ├── config/
-│       │   ├── AppConfig.java            ChatClient bean, @EnableScheduling
-│       │   ├── MistralRestClientConfig.java  ← FIXES M4/M6 JSON parse error
-│       │   ├── SecurityConfig.java
-│       │   ├── WebClientConfig.java
-│       │   └── DataSeeder.java           Seeds 20 algorithm topics on startup
-│       ├── controller/
-│       │   ├── AuthController.java
-│       │   ├── UserController.java
-│       │   ├── AnalyticsController.java
-│       │   ├── RecommendationController.java
-│       │   ├── SubmissionController.java  GET /api/submissions/recent
-│       │   ├── AiRecommendationController.java
-│       │   └── AdminController.java
-│       ├── entity/
-│       │   ├── User.java                 (4 platform handles)
-│       │   ├── Problem.java
-│       │   ├── Submission.java
-│       │   ├── Topic.java
-│       │   ├── Recommendation.java
-│       │   ├── AiRecommendationSession.java
-│       │   └── AiRecommendationItem.java
-│       ├── dto/
-│       │   ├── request/  LoginRequest, RegisterRequest, UpdateProfileRequest, AiPromptRequest
-│       │   └── response/ AuthResponse, UserProfileResponse, PerformanceAnalyticsResponse,
-│       │                 RecommendationResponse, AiPromptResponse, RecentSubmissionResponse
-│       ├── repository/   (all JPA repositories + pruning queries)
-│       ├── security/     JwtUtil, JwtAuthFilter, UserPrincipal, UserDetailsServiceImpl
-│       └── service/
-│           ├── impl/
-│           │   ├── AnalyticsServiceImpl.java      Combined analytics + streak + platform breakdown
-│           │   ├── CombinedRatingCalculator.java  CodePulse Rating algorithm
-│           │   ├── CodeforcesDataService.java     CF API sync
-│           │   ├── LeetcodeDataService.java       LC GraphQL sync
-│           │   ├── AtCoderDataService.java        kenkoooo API sync
-│           │   ├── CodeChefDataService.java       CC community API sync
-│           │   ├── AiRecommendationServiceImpl.java  Mistral AI + DB storage
-│           │   ├── RecommendationServiceImpl.java    Algorithmic recommendations
-│           │   ├── SubmissionPruningService.java     300-submission ceiling
-│           │   ├── ScheduledSyncService.java         Auto-sync every 6h
-│           │   ├── AuthServiceImpl.java
-│           │   └── UserServiceImpl.java
-│           ├── AnalyticsService.java
-│           ├── AiRecommendationService.java
-│           ├── RecommendationService.java
-│           └── UserService.java
-│
-└── frontend/                             Next.js 14 frontend
-    ├── app/
-    │   ├── page.tsx                      → redirects to /auth/login
-    │   ├── layout.tsx                    Root layout
-    │   ├── globals.css                   Cyberpunk theme + neon utils
-    │   ├── auth/login/page.tsx           Split-panel login + particle bg
-    │   ├── auth/register/page.tsx        2-step wizard
-    │   ├── dashboard/
-    │   │   ├── layout.tsx                Auth guard + sidebar + particle bg
-    │   │   └── page.tsx                  Overview: rating, handles, recent subs
-    │   ├── analytics/page.tsx            Deep analytics + insights panel
-    │   ├── recommendations/page.tsx      Curated problem recommendations
-    │   ├── ai-recommend/page.tsx         AI Coach with prompt + stored session
-    │   └── profile/page.tsx             Handles pre-filled from server
-    ├── components/
-    │   ├── animations/ParticleBackground.tsx
-    │   ├── charts/
-    │   │   ├── RatingLineChart.tsx
-    │   │   ├── VerdictDonut.tsx
-    │   │   ├── WeaknessRadar.tsx
-    │   │   └── DifficultyBar.tsx + ActivityHeatmap (same file)
-    │   ├── dashboard/
-    │   │   ├── StatCard.tsx              Animated CountUp stat card
-    │   │   ├── StreakWidget.tsx          Streak + rating tier display
-    │   │   └── RecommendationCard.tsx
-    │   └── layout/
-    │       ├── Sidebar.tsx               Collapsible + mobile + platform badges
-    │       └── Providers.tsx             QueryClient + Toaster
-    └── lib/
-        ├── api.ts                        Axios client + all API functions
-        ├── store.ts                      Zustand auth store
-        └── ratingTier.ts                 Tier label helper
+src/main/java/com/codepulse/
+├── CodePulseApplication.java
+├── config/                      DataSeeder, SecurityConfig, WebClientConfig
+├── controller/
+│   ├── AdminController.java
+│   ├── AiDiagnosticsController.java      (self-test for AI providers)
+│   ├── AiRecommendationController.java
+│   ├── AnalyticsController.java
+│   ├── AuthController.java
+│   ├── RecommendationController.java
+│   ├── SubmissionController.java
+│   └── UserController.java
+├── dto/request | dto/response
+├── entity/
+│   ├── AiRecommendationItem.java
+│   ├── AiRecommendationSession.java
+│   ├── Problem.java
+│   ├── Recommendation.java
+│   ├── Submission.java
+│   ├── Topic.java
+│   └── User.java
+├── exception/                   BadRequest, ResourceNotFound, GlobalExceptionHandler
+├── repository/                  7 Spring Data JPA repositories
+├── security/                    JwtAuthenticationFilter, JwtUtil, UserDetailsServiceImpl, UserPrincipal
+└── service/
+    ├── AiRecommendationService, AnalyticsService, AuthService, RecommendationService, UserService
+    └── impl/
+        ├── AiRecommendationServiceImpl.java   AI orchestration + persistence
+        ├── AiJsonUtil.java                    JSON extraction / validation helpers
+        ├── ModelHealthRegistry.java           remembers working / failing models
+        ├── GroqService.java                   Groq provider (auto model discovery)
+        ├── DirectMistralService.java          Mistral provider (auto model discovery)
+        ├── OpenRouterService.java             OpenRouter provider (free models)
+        ├── OpenRouterModelDiscovery.java      finds usable free OpenRouter models
+        ├── AnalyticsServiceImpl.java
+        ├── CombinedRatingCalculator.java      CodePulse Rating
+        ├── CodeforcesDataService.java
+        ├── LeetcodeDataService.java
+        ├── AtCoderDataService.java
+        ├── CodeChefDataService.java
+        ├── SubmissionPruningService.java
+        ├── ScheduledSyncService.java
+        ├── RecommendationServiceImpl.java     rule-based engine
+        ├── AuthServiceImpl.java
+        └── UserServiceImpl.java
 ```
 
 ---
 
-## Setup & Running
+## Setup
 
-### Prerequisites
-- Java 17+
-- Node.js 18+
-- PostgreSQL 15+
-- Mistral AI API key (free at [console.mistral.ai](https://console.mistral.ai))
+### 1. Database
+Create a PostgreSQL database (local, or a Neon project). Tables are created automatically
+(`spring.jpa.hibernate.ddl-auto=update`).
 
----
+### 2. Configure `src/main/resources/application.properties`
 
-### Backend Setup
-
-**1. Create the database**
-```sql
-CREATE DATABASE codepulse;
-```
-
-**2. Generate JWT secret**
-```bash
-openssl rand -base64 32
-```
-
-**3. Configure `application.properties`**
 ```properties
-spring.datasource.url=jdbc:postgresql://localhost:5432/codepulse
-spring.datasource.username=postgres
-spring.datasource.password=YOUR_DB_PASSWORD
+server.port=8080
 
-jwt.secret=YOUR_BASE64_SECRET_FROM_ABOVE
+# --- Database (example for Neon; use your own values) ---
+spring.datasource.url=jdbc:postgresql://<host>/<db>?sslmode=require
+spring.datasource.username=<user>
+spring.datasource.password=<password>
+spring.datasource.driver-class-name=org.postgresql.Driver
+spring.jpa.hibernate.ddl-auto=update
+spring.jpa.show-sql=false
+spring.jpa.open-in-view=false
 
-spring.ai.mistralai.api-key=YOUR_MISTRAL_API_KEY
+# --- JWT ---
+jwt.secret=<base64-encoded 256-bit secret>      # openssl rand -base64 32
+jwt.expiration=86400000
+
+# --- CORS ---
+cors.allowed-origins=http://localhost:3000
+
+# --- Platform APIs ---
+codeforces.api.base-url=https://codeforces.com/api
+leetcode.api.base-url=https://leetcode.com/graphql
+leetcode.max-submissions=200
+atcoder.api.base-url=https://kenkoooo.com/atcoder
+atcoder.difficulties.url=https://kenkoooo.com/atcoder/resources/problem-models.json
+codechef.api.base-url=https://codechef-api.vercel.app
+
+# --- Housekeeping ---
+codepulse.submissions.max-per-user=300
+codepulse.sync.enabled=true
+codepulse.sync.cron=0 0 */6 * * *
+
+# --- AI providers: ONLY the keys are needed (leave one out to skip that provider) ---
+app.groq.api-key=gsk_<your key>
+mistral.api-key=<your key>
+app.openrouter.api-key=sk-or-v1-<your key>
 ```
 
-Or use environment variables:
-```bash
-export MISTRAL_API_KEY=your_key_here
-```
+Rules for keys: one per line, no quotes, no spaces, keep the prefix (`gsk_`, `sk-or-v1-`).
+**Never commit `application.properties` to Git** (add it to `.gitignore`) and rotate any key that was shared.
 
-**4. Run**
+Free keys: Groq https://console.groq.com/keys · Mistral https://console.mistral.ai · OpenRouter https://openrouter.ai/keys
+
+### 3. Run
 ```bash
+mvn clean package -DskipTests
 mvn spring-boot:run
 ```
-
-Server starts on `http://localhost:8080`. 20 algorithm topics are seeded automatically.
-
-**Known Fix — Mistral M6 JSON parse error:**  
-The `MistralRestClientConfig.java` bean is already included and fixes the `prompt_tokens_details` `UnrecognizedPropertyException` that occurs with Spring AI milestone versions. No manual action needed — it is auto-configured on startup.
+The API starts on `http://localhost:8080`. Frontend (separate project): `npm install && npm run dev` → `http://localhost:3000`.
 
 ---
 
-### Frontend Setup
+## How the AI Recommendation Works
 
-**1. Install dependencies**
-```bash
-cd frontend
-npm install
+```
+POST /api/ai/recommend  { "prompt": "some dp problems", "count": 4 }
+        │
+        ▼
+1. Build context from the user's analytics (rating, weak topics, recent solves / failures)
+2. Choose provider order automatically: last working first, recently failed last
+3. For each provider: discover the models the key can use, try them best-first
+4. Accept an answer ONLY if it is valid JSON containing a "recommendations" array
+5. Clean the result (real platform URLs only), save the session + items, return it
 ```
 
-**2. Configure environment**
-```bash
-cp .env.local.example .env.local
-# Edit if backend is not on localhost:8080
-# NEXT_PUBLIC_API_URL=http://localhost:8080
-```
+Key behaviours:
 
-**3. Run**
-```bash
-npm run dev
-```
+- **No model names to configure.** Groq and Mistral are asked which models your key can use; OpenRouter is
+  filtered to truly free text models (non-reasoning and JSON-capable ones first).
+- **Automatic fallback** Groq → Mistral → OpenRouter, and model-by-model inside each provider.
+- **Failure memory** (`ModelHealthRegistry`): rate-limited models are skipped for 3 minutes, dead or useless
+  models for 10–60 minutes, so later requests are fast. Nothing is banned forever.
+- **Strict validation:** reasoning text, refusals, truncated JSON or empty lists count as failures and the next
+  model is tried; `<think>` blocks and code fences are stripped.
+- **Safe links:** a model's URL is kept only if it points to Codeforces, LeetCode, AtCoder or CodeChef,
+  otherwise a search link is generated.
+- **No long DB transactions:** the LLM call runs outside any transaction; saving uses a short one.
+- **Time limits:** 45–60 s per model, at most 10 OpenRouter attempts within 90 s.
+- If every provider fails, the API returns an empty list with a friendly message (never a stack trace).
 
-Open [http://localhost:3000](http://localhost:3000) — redirects to login.
+Self-test (needs a login token):
+```powershell
+$h = @{ Authorization = "Bearer <token>" }
+Invoke-RestMethod http://localhost:8080/api/ai/health/groq       -Headers $h
+Invoke-RestMethod http://localhost:8080/api/ai/health/mistral    -Headers $h
+Invoke-RestMethod http://localhost:8080/api/ai/health/openrouter -Headers $h
+```
+Expected: `status = OK`. Remove `AiDiagnosticsController` before a public deployment.
+
+---
+
+## CodePulse Rating
+
+1. Estimate a rating per connected platform:
+   - **Codeforces:** latest real rating from `user.rating` (fallback: average rating of solved problems).
+   - **LeetCode:** `1200 + 2·Easy + 9·Medium + 22·Hard + acceptance%` (max 3200).
+   - **AtCoder:** average difficulty of solved problems × 1.05 (fallback: 800 + 8 per solved).
+   - **CodeChef:** `1000 + 3·Easy + 10·Medium + 20·Hard + 35·Expert` (max 3000).
+2. Weight each platform by `sqrt(number of submissions on that platform)`.
+3. Final rating = weighted average, clamped to 800 – 3800.
+
+Tiers: Beginner (<1000) · Pupil · Apprentice · Specialist · Expert · Candidate Master · Master ·
+International Master · Grandmaster · Legendary Grandmaster (≥3000).
+
+---
+
+## Platform Sync
+
+| Platform   | Source                         | What is imported                                   |
+|------------|--------------------------------|----------------------------------------------------|
+| Codeforces | official API `user.status`     | latest 200 submissions with verdict, tags, rating  |
+| LeetCode   | GraphQL `recentSubmissionList` | up to `leetcode.max-submissions` with all verdicts |
+| AtCoder    | kenkoooo community API         | all submissions + difficulty models                |
+| CodeChef   | community profile API          | solved problem codes (time = sync time)            |
+
+Sync runs when the user presses *Sync* (`POST /api/analytics/sync`) and automatically every 6 hours
+(`ScheduledSyncService`). After each sync, `SubmissionPruningService` keeps only the newest
+`codepulse.submissions.max-per-user` submissions.
 
 ---
 
 ## API Reference
 
-### Authentication
-```
-POST /api/auth/register   { username, email, password, fullName }
-POST /api/auth/login      { email, password }
-```
-Both return: `{ token, type, userId, username, email, role }`
+All endpoints except `/api/auth/**` need `Authorization: Bearer <token>`.
 
-### User
-```
-GET  /api/users/me              Get own profile (with platform handles)
-PUT  /api/users/me              Update profile (handles, fullName, avatar)
-GET  /api/users/{id}            Get user by ID
-```
+### Auth
+| Method | Endpoint             | Body                                    |
+|--------|----------------------|-----------------------------------------|
+| POST   | `/api/auth/register` | `{username, email, password, fullName}` |
+| POST   | `/api/auth/login`    | `{email, password}`                     |
 
-### Analytics
-```
-GET  /api/analytics/me          Full combined analytics (all 4 platforms)
-GET  /api/analytics/{userId}    Analytics for specific user
-POST /api/analytics/sync        Trigger sync for all connected platforms (async)
-```
+Both return `{ token, type, userId, username, email, role }`.
 
-### Submissions
-```
-GET  /api/submissions/recent?limit=10   Recent submissions (all platforms)
-```
+### Users
+| Method | Endpoint          | Description        |
+|--------|-------------------|--------------------|
+| GET    | `/api/users/me`   | Own profile        |
+| PUT    | `/api/users/me`   | Update profile and platform handles (`codeforcesHandle`, `leetcodeHandle`, `atcoderHandle`, `codechefHandle`, `fullName`, `avatarUrl`) |
+| GET    | `/api/users/{id}` | Profile by id      |
 
-### Recommendations (algorithmic)
-```
-GET  /api/recommendations               Active curated recommendations
-POST /api/recommendations/generate      Generate new (replaces previous)
-PATCH /api/recommendations/{id}/solved  Mark solved
-PATCH /api/recommendations/{id}/dismiss Dismiss
-```
+### Analytics & Submissions
+| Method | Endpoint                              | Description                               |
+|--------|---------------------------------------|-------------------------------------------|
+| GET    | `/api/analytics/me`                   | Full analytics for the current user       |
+| GET    | `/api/analytics/{id}`                 | Analytics for a specific user             |
+| POST   | `/api/analytics/sync`                 | Sync all connected platforms              |
+| GET    | `/api/submissions/recent?limit=12`    | Most recent submissions (max 50)          |
 
-### AI Coach
-```
-POST /api/ai/recommend              Generate AI recommendations with { prompt, count }
-GET  /api/ai/sessions/latest        Load stored AI session
-PATCH /api/ai/items/{id}/solved     Mark AI item solved
-PATCH /api/ai/items/{id}/dismiss    Dismiss AI item
-```
+Analytics response: `totalSubmissions`, `acceptedSubmissions`, `uniqueProblemsSolved`, `acceptanceRate`,
+`currentStreak`, `longestStreak`, `totalActiveDays`, `combinedRating`, `ratingTier`, `platformRatings`,
+`topicBreakdown`, `weaknessScores`, `difficultyBreakdown`, `activityHeatmap`, `verdictDistribution`,
+`ratingTrend`, `platformBreakdown`.
 
-### Admin
-```
-GET    /api/admin/users             List all users
-GET    /api/admin/users/{id}        Get user by ID
-DELETE /api/admin/users/{id}        Deactivate user
-```
+### Rule-based recommendations
+| Method | Endpoint                            | Description                     |
+|--------|-------------------------------------|---------------------------------|
+| GET    | `/api/recommendations`              | Active recommendations          |
+| POST   | `/api/recommendations/generate`     | (Re)generate                    |
+| PATCH  | `/api/recommendations/{id}/solved`  | Mark solved                     |
+| PATCH  | `/api/recommendations/{id}/dismiss` | Dismiss                         |
 
-All endpoints except `/api/auth/**` require:
-```
-Authorization: Bearer <token>
-```
+### AI recommendations
+| Method | Endpoint                         | Description                                           |
+|--------|----------------------------------|-------------------------------------------------------|
+| POST   | `/api/ai/recommend`              | `{prompt, count (1-10)}` → new session (replaces old) |
+| GET    | `/api/ai/sessions/latest`        | Latest stored session, or `null`                      |
+| PATCH  | `/api/ai/items/{itemId}/solved`  | Mark an AI item solved                                |
+| PATCH  | `/api/ai/items/{itemId}/dismiss` | Dismiss an AI item                                    |
+| GET    | `/api/ai/health/{provider}`      | Self-test: `groq`, `mistral` or `openrouter`          |
 
----
+Response fields: `sessionId`, `recommendations[]` (`itemId`, `title`, `platform`, `url`, `difficulty`,
+`estimatedRating`, `topics`, `reason`, `timeEstimate`, `solved`, `dismissed`), `coachInsight`, `focusAreas`,
+`originalPrompt`, `modelUsed`, `generatedAt`.
 
-## Data Flow
-
-```
-User sets handle(s) in Profile
-         ↓
-POST /api/analytics/sync (or auto every 6h)
-         ↓
-  ┌──────┴──────────────────────────────────┐
-  │  CF: /user.status (up to 200 subs)      │
-  │  LC: GraphQL recentSubmissionList       │
-  │  AC: kenkoooo /user/submissions         │
-  │  CC: community API /handle             │
-  └──────────────┬──────────────────────────┘
-                 ↓
-  Problems + Topics stored (platform-tagged)
-  Submissions stored (deduplicated by platformSubmissionId)
-  Pruning: keep latest 300 per user
-                 ↓
-GET /api/analytics/me
-  → Computes CodePulse Rating (weighted average)
-  → Streak calculation (all platforms combined)
-  → Weakness scores, topic breakdown, difficulty distribution
-  → Platform breakdown per-platform stats
-  → CF rating trend (live from CF API)
-                 ↓
-Frontend: InsightsEngine generates 6–10 findings from the data
-                 ↓
-POST /api/ai/recommend { prompt: "I want to practice DP" }
-  → Builds rich context (rating, weaknesses, recent WA topics, etc.)
-  → Sends to Mistral API → JSON response
-  → Stored in ai_recommendation_sessions + ai_recommendation_items
-  → Returned with clickable problem URLs
-```
+### Admin (ROLE_ADMIN)
+| Method | Endpoint                | Description     |
+|--------|-------------------------|-----------------|
+| GET    | `/api/admin/users`      | List all users  |
+| GET    | `/api/admin/users/{id}` | Get user        |
+| DELETE | `/api/admin/users/{id}` | Deactivate user |
 
 ---
 
-## Environment Variables
+## Data Model
 
-### Backend
-| Variable | Description |
-|---|---|
-| `MISTRAL_API_KEY` | Your Mistral AI API key |
-| `spring.datasource.password` | PostgreSQL password |
-| `jwt.secret` | Base64-encoded 256-bit JWT signing key |
-| `codepulse.submissions.max-per-user` | Submission ceiling (default: 300) |
-| `codepulse.sync.cron` | Cron expression for auto-sync (default: every 6h) |
+```
+User ──< Submission >── Problem >──< Topic
+User ──< Recommendation >── Problem
+User ──< AiRecommendationSession ──< AiRecommendationItem
+```
 
-### Frontend
-| Variable | Description |
-|---|---|
-| `NEXT_PUBLIC_API_URL` | Backend URL (default: `http://localhost:8080`) |
+Only one AI session per user is active at a time; creating a new one deactivates the previous one.
 
 ---
 
-## Page Guide
+## Workflow
 
-| Route | Purpose | Key content |
-|---|---|---|
-| `/dashboard` | Overview | CodePulse Rating, platform handles + stats, streak, recent submissions |
-| `/analytics` | Deep analysis | Heatmap, platform breakdown, CF trend, topic radar, **hidden insights** |
-| `/recommendations` | Curated problems | Algorithmic recs from weak topics, all 4 platforms, generate/dismiss |
-| `/ai-recommend` | AI Coach | Prompt input, Mistral-generated recs with full context, stored session |
-| `/profile` | Account | All handles (pre-filled from server), connection status, edit form |
+```
+User sets platform handles (profile page)
+        ↓
+POST /api/analytics/sync        (also automatic every 6 h)
+        ↓
+Submissions, problems and topics stored; old submissions pruned
+        ↓
+GET /api/analytics/me           CodePulse Rating + all metrics computed on the fly
+        ↓
+POST /api/recommendations/generate     or     POST /api/ai/recommend
+        ↓
+Frontend shows ranked problems; user marks solved / dismisses (feedback loop)
+```
 
 ---
 
 ## Troubleshooting
 
-### Mistral AI — `prompt_tokens_details` UnrecognizedPropertyException
-Already fixed by `MistralRestClientConfig.java`. Also ensure your `application.properties` has:
-```properties
-spring.jackson.deserialization.fail-on-unknown-properties=false
-```
-
-### Handles not showing on dashboard/profile
-The profile page now always fetches from the server (`staleTime: 0`) and the dashboard refreshes the profile on load. If handles still aren't showing, click "Sync All Platforms" — this calls `PUT /api/analytics/sync` which re-reads handles from the DB.
-
-### LeetCode sync failing
-LeetCode's GraphQL endpoint occasionally rate-limits. Try again after a few minutes.
-
-### AtCoder sync slow
-The kenkoooo.com API returns the complete submission history in one call. First sync may take a few seconds.
+| Symptom (log)                                              | Cause / fix                                                                 |
+|------------------------------------------------------------|-----------------------------------------------------------------------------|
+| `Groq rejected the API key (HTTP 401)`                     | Wrong or revoked key. Create a new one, paste the full `gsk_…` string.     |
+| `Mistral HTTP 429 Rate limit exceeded`                     | Free-tier limit. Wait; the app falls back to other providers by itself.    |
+| `model_not_found` / `decommissioned`                       | Harmless; the model is skipped and the list is re-read from the provider.  |
+| OpenRouter `402`, `403`, `429`                             | Paid / restricted / busy model; skipped automatically.                     |
+| `empty content (finish_reason=length)`                     | Reasoning model ran out of tokens; skipped and put on cooldown.            |
+| `All AI providers failed`                                  | No key works right now. Run the `/api/ai/health/*` checks and fix the keys.|
+| `There is not enough space on the disk` during `install`   | Free disk space; use `mvn clean package -DskipTests` instead of `install`. |
+| `LazyInitializationException`                              | `open-in-view=false` is intentional; read lazy data inside `@Transactional`.|
+| `HHH90000025 PostgreSQLDialect...` warning                 | Remove `spring.jpa.properties.hibernate.dialect` from properties.          |
 
 ---
 
-*CodePulse — Department of IIT, University of Dhaka*
+## Security
+
+- Passwords are hashed with BCrypt; JWT expiry is set by `jwt.expiration` (milliseconds).
+- Keep secrets (database password, `jwt.secret`, API keys) out of Git; use environment variables or a local,
+  git-ignored properties file.
+- Open-in-view is disabled so database connections are released right after each repository call.
